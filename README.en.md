@@ -62,9 +62,7 @@ scripts/release_build.sh
 
 Note: Unsigned/unnotarized DMG files can be blocked on a new Mac and may show as “damaged”.
 
-## Free distribution (without paid signing/notarization)
-
-If you distribute without Developer ID notarization, include these steps in release notes:
+## Installation Guidelines
 
 1. Open the DMG and drag `centerWindows.app` into `Applications`.
 2. In `Applications`, right-click `centerWindows.app` -> `Open` -> click `Open` again.
