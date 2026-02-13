@@ -7,8 +7,8 @@ English | [简体中文](./README.md)
 ## Features
 
 - Center once immediately on app launch
-- Auto-center detection toggle (menu item)
-- Detection interval switch (1s / 2s / 5s)
+- Center once when a new window is created / focused again after being closed
+- Moving a window will not trigger re-centering
 - Center inside usable screen area excluding Dock and menu bar (`screen.frame - screen.visibleFrame`)
 - Auto-generated app icon and menu bar icon
 

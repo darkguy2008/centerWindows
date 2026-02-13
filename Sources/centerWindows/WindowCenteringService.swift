@@ -48,6 +48,10 @@ final class WindowCenteringService {
         }
 
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        if isApplicationInFullscreen(appElement) {
+            throw WindowCenteringError.fullscreenWindow
+        }
+
         let focusedWindow = focusedWindowElement(for: appElement)
         let allWindows = windowElements(for: appElement)
         guard let windowElement = selectCenterableWindow(
@@ -55,13 +59,21 @@ final class WindowCenteringService {
             windows: allWindows,
             selectionPolicy: selectionPolicy
         ) else {
-            if let focusedWindow, boolAttribute("AXFullScreen" as CFString, on: focusedWindow) == true {
-                throw WindowCenteringError.fullscreenWindow
-            }
-            if allWindows.contains(where: { boolAttribute("AXFullScreen" as CFString, on: $0) == true }) {
+            if let focusedWindow, isFullscreenWindow(focusedWindow) {
                 throw WindowCenteringError.fullscreenWindow
             }
             throw WindowCenteringError.noWindow
+        }
+
+        try centerWindowElement(windowElement)
+    }
+
+    func centerWindowElement(_ windowElement: AXUIElement, appElement: AXUIElement? = nil) throws {
+        if let appElement, isApplicationInFullscreen(appElement) {
+            throw WindowCenteringError.fullscreenWindow
+        }
+        if isFullscreenWindow(windowElement) {
+            throw WindowCenteringError.fullscreenWindow
         }
 
         guard
@@ -91,6 +103,10 @@ final class WindowCenteringService {
         windowAttribute(kAXFocusedWindowAttribute as CFString, on: appElement)
     }
 
+    private func mainWindowElement(for appElement: AXUIElement) -> AXUIElement? {
+        windowAttribute(kAXMainWindowAttribute as CFString, on: appElement)
+    }
+
     private func windowElements(for appElement: AXUIElement) -> [AXUIElement] {
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &value)
@@ -100,18 +116,29 @@ final class WindowCenteringService {
         return (value as? [AXUIElement]) ?? []
     }
 
+    private func isApplicationInFullscreen(_ appElement: AXUIElement) -> Bool {
+        // Prefer checking main/focused window to avoid scanning too many windows.
+        if let main = mainWindowElement(for: appElement), isFullscreenWindow(main) {
+            return true
+        }
+        if let focused = focusedWindowElement(for: appElement), isFullscreenWindow(focused) {
+            return true
+        }
+        return false
+    }
+
     private func selectCenterableWindow(
         focused: AXUIElement?,
         windows: [AXUIElement],
         selectionPolicy: WindowSelectionPolicy
     ) -> AXUIElement? {
-        if let focused, boolAttribute("AXFullScreen" as CFString, on: focused) != true {
+        if let focused, !isFullscreenWindow(focused) {
             return focused
         }
         if selectionPolicy == .focusedOnly {
             return nil
         }
-        return windows.first(where: { boolAttribute("AXFullScreen" as CFString, on: $0) != true })
+        return windows.first(where: { !isFullscreenWindow($0) })
     }
 
     private func windowAttribute(_ attribute: CFString, on element: AXUIElement) -> AXUIElement? {
@@ -183,6 +210,64 @@ final class WindowCenteringService {
             return nil
         }
         return CFBooleanGetValue(unsafeDowncast(value, to: CFBoolean.self))
+    }
+
+    private func isFullscreenWindow(_ windowElement: AXUIElement) -> Bool {
+        // Primary signal if available.
+        if boolAttribute("AXFullScreen" as CFString, on: windowElement) == true {
+            return true
+        }
+
+        // Fallback for apps/spaces that don't expose AXFullScreen reliably.
+        // Try both coordinate interpretations against every screen and accept the best match.
+        guard
+            let rawPosition = pointAttribute(kAXPositionAttribute as CFString, on: windowElement),
+            let windowSize = sizeAttribute(kAXSizeAttribute as CFString, on: windowElement)
+        else {
+            return false
+        }
+
+        for screen in NSScreen.screens {
+            let screenFrame = screen.frame
+
+            // Assume bottom-left coordinates.
+            let bottomLeftRect = CGRect(origin: rawPosition, size: windowSize)
+            if isFullscreenLike(windowFrame: bottomLeftRect, screenFrame: screenFrame) {
+                return true
+            }
+
+            // Assume top-left coordinates (y from top of the current screen).
+            let convertedBottomY = screenFrame.maxY - rawPosition.y - windowSize.height
+            let topLeftRect = CGRect(
+                x: rawPosition.x,
+                y: convertedBottomY,
+                width: windowSize.width,
+                height: windowSize.height
+            )
+            if isFullscreenLike(windowFrame: topLeftRect, screenFrame: screenFrame) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func isFullscreenLike(windowFrame: CGRect, screenFrame: CGRect) -> Bool {
+        // Be tolerant of minor off-by-few-pixels differences (rounded corners, scaling, etc.).
+        let tol: CGFloat = 6.0
+        let posMatch = abs(windowFrame.minX - screenFrame.minX) <= tol &&
+            abs(windowFrame.minY - screenFrame.minY) <= tol
+        let sizeMatch = abs(windowFrame.width - screenFrame.width) <= tol &&
+            abs(windowFrame.height - screenFrame.height) <= tol
+
+        if posMatch && sizeMatch {
+            return true
+        }
+
+        // Secondary heuristic: near-full coverage with aligned origin.
+        let screenArea = max(1.0, screenFrame.width * screenFrame.height)
+        let ratio = (windowFrame.width * windowFrame.height) / screenArea
+        return posMatch && ratio >= 0.98
     }
 
     private func detectWindowContext(rawPosition: CGPoint, windowSize: CGSize) -> (screen: NSScreen, mode: CoordinateMode)? {

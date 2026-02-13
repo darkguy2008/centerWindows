@@ -3,27 +3,20 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let centeringService = WindowCenteringService()
+    private lazy var eventObserver = WindowEventObserver(service: centeringService)
     private var statusItem: NSStatusItem?
-    private var autoCenterTimer: Timer?
-    private var autoCenterEnabled = true
-    private let detectionIntervals: [TimeInterval] = [1.0, 2.0, 5.0]
-    private var currentIntervalIndex = 1
-    private var autoCenterToggleItem: NSMenuItem?
-    private var intervalItem: NSMenuItem?
-    private var crossScreenFallbackEnabled = true
-    private var crossScreenFallbackItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
         _ = ScreenCapturePermission.ensureAuthorized(prompt: true)
         _ = AccessibilityPermission.ensureTrusted(prompt: true)
         centerOnceOnLaunch()
-        restartAutoCenterTimerIfNeeded()
+        eventObserver.start()
     }
 
     @objc private func centerNow() {
         do {
-            try centeringService.centerFrontmostWindow(selectionPolicy: selectionPolicy)
+            try centeringService.centerFrontmostWindow(selectionPolicy: .focusedOnly)
         } catch {
             if let centeringError = error as? WindowCenteringError, centeringError == .fullscreenWindow {
                 return
@@ -42,25 +35,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
-    }
-
-    @objc private func toggleAutoCenter() {
-        autoCenterEnabled.toggle()
-        autoCenterToggleItem?.state = autoCenterEnabled ? .on : .off
-        restartAutoCenterTimerIfNeeded()
-    }
-
-    @objc private func cycleDetectionInterval() {
-        currentIntervalIndex = (currentIntervalIndex + 1) % detectionIntervals.count
-        intervalItem?.title = intervalMenuTitle
-        if autoCenterEnabled {
-            restartAutoCenterTimerIfNeeded()
-        }
-    }
-
-    @objc private func toggleCrossScreenFallback() {
-        crossScreenFallbackEnabled.toggle()
-        crossScreenFallbackItem?.state = crossScreenFallbackEnabled ? .on : .off
     }
 
     private func setupStatusItem() {
@@ -87,32 +61,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: ""
         )
         centerItem.target = self
-
-        let toggleItem = menu.addItem(
-            withTitle: "自动居中检测",
-            action: #selector(toggleAutoCenter),
-            keyEquivalent: ""
-        )
-        toggleItem.target = self
-        toggleItem.state = autoCenterEnabled ? .on : .off
-        autoCenterToggleItem = toggleItem
-
-        let intervalItem = menu.addItem(
-            withTitle: intervalMenuTitle,
-            action: #selector(cycleDetectionInterval),
-            keyEquivalent: ""
-        )
-        intervalItem.target = self
-        self.intervalItem = intervalItem
-
-        let fallbackItem = menu.addItem(
-            withTitle: "多屏回退到非全屏窗口",
-            action: #selector(toggleCrossScreenFallback),
-            keyEquivalent: ""
-        )
-        fallbackItem.target = self
-        fallbackItem.state = crossScreenFallbackEnabled ? .on : .off
-        crossScreenFallbackItem = fallbackItem
 
         menu.addItem(.separator())
         let permissionItem = menu.addItem(
@@ -142,33 +90,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func centerOnceOnLaunch() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.centerNow()
-        }
-    }
-
-    private var intervalMenuTitle: String {
-        let interval = detectionIntervals[currentIntervalIndex]
-        return String(format: "检测间隔：%.0f 秒（点击切换）", interval)
-    }
-
-    private var selectionPolicy: WindowSelectionPolicy {
-        crossScreenFallbackEnabled ? .focusedOrAnyNonFullscreen : .focusedOnly
-    }
-
-    private func restartAutoCenterTimerIfNeeded() {
-        autoCenterTimer?.invalidate()
-        autoCenterTimer = nil
-
-        guard autoCenterEnabled else {
-            return
-        }
-
-        let interval = detectionIntervals[currentIntervalIndex]
-        autoCenterTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                guard AccessibilityPermission.ensureTrusted(prompt: false) else { return }
-                try? self.centeringService.centerFrontmostWindow(selectionPolicy: self.selectionPolicy)
-            }
         }
     }
 
