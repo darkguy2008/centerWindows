@@ -1,70 +1,43 @@
-# CenterWindow（macOS 窗口自动居中工具）
+# centerWindows
 
-一个菜单栏常驻的 macOS 窗口管理工具：在应用启动时将前台窗口居中到当前屏幕可用区域（避开 Dock / 菜单栏）。
+[English](./README.en.md) | 简体中文
+
+`centerWindows` 是一个 macOS 菜单栏窗口管理工具：应用启动后立即将前台窗口居中，并支持自动检测居中（可开关、可调间隔）。
 
 ## 功能
 
-- 启动即居中：应用打开时自动执行一次窗口居中。
-- 手动居中：菜单栏点击“立即将前台窗口居中”。
-- 权限引导：首次启动会触发屏幕录制权限和辅助功能权限请求。
-- 多屏支持：按窗口当前所在屏幕计算居中坐标。
-- 精确避让：通过 `screen.frame - screen.visibleFrame` 计算 Dock 与状态栏占用像素，再在剩余区域居中。
+- 启动立即居中一次
+- 自动居中检测开关（菜单勾选）
+- 检测间隔切换（1s / 2s / 5s）
+- 排除 Dock 与状态栏后居中（基于 `screen.frame - screen.visibleFrame`）
+- 菜单栏图标与应用图标自动生成
 
 ## 系统要求
 
-- macOS 13 或更高版本
+- macOS 13+
 - Xcode Command Line Tools（`xcode-select --install`）
-- 正式分发需 Apple Developer Program 账号（Developer ID）
 
-## 本地构建与运行
+## 本地构建
 
 ```bash
 swift test
 swift build -c release
-./.build/release/CenterWindow
+./.build/release/centerWindows
 ```
 
-## 生成可安装 `.app` 与 `.dmg`
+## 打包
 
 ```bash
 scripts/build_app.sh
 scripts/create_dmg.sh
 ```
 
-说明：
+输出：
 
-- `scripts/build_app.sh` 每次都会重新绘制应用图标与状态栏图标，并重建 `.app`。
-- 执行 `scripts/create_dmg.sh` 会基于最新 `.app` 重新生成 `.dmg`。
+- `dist/centerWindows.app`
+- `dist/centerWindows.dmg`
 
-输出文件：
-
-- `dist/CenterWindow.app`
-- `dist/CenterWindow.dmg`
-
-## 签名 + 公证（Developer ID 正式分发）
-
-### 1) 前置：准备证书
-
-在 Keychain 中安装你的 `Developer ID Application` 证书（Apple Developer 账号签发）。
-
-用下面命令确认可用身份：
-
-```bash
-security find-identity -v -p codesigning
-```
-
-### 2) 前置：配置 notarytool 凭据
-
-建议先保存一个 Keychain profile（只做一次）：
-
-```bash
-xcrun notarytool store-credentials "AC_NOTARY" \
-  --apple-id "YOUR_APPLE_ID" \
-  --team-id "YOUR_TEAM_ID" \
-  --password "YOUR_APP_SPECIFIC_PASSWORD"
-```
-
-### 3) 执行签名与公证
+## 签名与公证（Developer ID）
 
 ```bash
 export DEVELOPER_ID_APP="Developer ID Application: YOUR_NAME (TEAMID)"
@@ -72,31 +45,29 @@ export NOTARY_PROFILE="AC_NOTARY"
 scripts/sign_and_notarize.sh
 ```
 
-该脚本会依次执行：
+## 权限
 
-1. 对 `.app` 进行 hardened runtime 签名
-2. 验证 `.app` 签名
-3. 对 `.dmg` 签名
-4. 提交 Apple Notary
-5. stapler 回填票据
-6. Gatekeeper 验证
+### 辅助功能（Accessibility）
 
-## 最终安装验证
+- 路径：`系统设置 -> 隐私与安全性 -> 辅助功能`
+- 为什么需要：  
+  应用通过 macOS Accessibility API 读取前台窗口的位置/尺寸，并写入新位置来执行“窗口居中”。
+- 不授权会怎样：  
+  无法获取窗口几何信息，也无法移动窗口，居中功能不可用。
 
-```bash
-spctl --assess --type open --verbose=4 dist/CenterWindow.dmg
-```
+### 屏幕录制（Screen Recording）
 
-然后双击 `dist/CenterWindow.dmg`，拖入 `Applications` 安装。
+- 路径：`系统设置 -> 隐私与安全性 -> 屏幕录制`
+- 为什么需要：  
+  需要获取完整屏幕可见区域上下文，以便正确识别可用显示区域并精确避开 Dock/状态栏进行居中。
+- 不授权会怎样：  
+  屏幕上下文能力受限，可能导致多屏或复杂布局下的居中判断不稳定。
 
-## 辅助功能权限说明（必须）
+### 权限边界说明
 
-本软件通过 macOS Accessibility API 调整窗口位置，必须授予：
+- 本项目不会上传屏幕内容，不会进行网络采集。
+- 权限仅用于本地窗口几何计算与窗口位置调整。
 
-- `系统设置 -> 隐私与安全性 -> 辅助功能`
+## 开源协议
 
-如果未授权，软件无法获取/设置窗口坐标。
-
-另外首次启动会请求“屏幕录制”权限，用于获取完整屏幕可见区域上下文：
-
-- `系统设置 -> 隐私与安全性 -> 屏幕录制`
+MIT License，见 [LICENSE](./LICENSE)。

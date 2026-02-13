@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.button?.imagePosition = .imageOnly
             item.button?.title = ""
         } else {
-            item.button?.title = "CenterWindow"
+            item.button?.title = "centerWindows"
         }
 
         let menu = NSMenu()

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="CenterWindow"
-BUNDLE_ID="${BUNDLE_ID:-com.comet.centerwindow}"
+APP_NAME="centerWindows"
+BUNDLE_ID="${BUNDLE_ID:-com.comet.centerwindows}"
 VERSION="${VERSION:-1.0.0}"
 BUILD_DIR=".build/release"
 DIST_DIR="dist"
 APP_DIR="${DIST_DIR}/${APP_NAME}.app"
-BINARY_PATH="${BUILD_DIR}/CenterWindow"
+BINARY_PATH="${BUILD_DIR}/centerWindows"
 ICON_BUILD_DIR=".build/icons"
 APP_ICON="${ICON_BUILD_DIR}/AppIcon.icns"
 STATUS_ICON="${ICON_BUILD_DIR}/StatusIconTemplate.png"

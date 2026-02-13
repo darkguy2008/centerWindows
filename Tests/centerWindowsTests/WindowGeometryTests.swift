@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import macOSWindows
+@testable import centerWindows
 
 @Test
 func centerWindowInVisibleFrame() async throws {
