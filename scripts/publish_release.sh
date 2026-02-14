@@ -51,6 +51,7 @@ BODY=$(
   cat <<'EOF' | json_escape
 ## Fixes
 - Auto-center now triggers reliably on app activation and new app windows (no need to switch away and back).
+- Multi-monitor: keep windows centered on their current display (no more jumping from screen 2 to screen 1).
 - Secondary windows (dialogs/panels) are excluded from auto-centering; only standard main windows are centered.
 - Better handling when a window is partially off-screen: first moves it back into the visible region, then centers it.
 EOF
@@ -102,4 +103,3 @@ curl -sS \
   >/dev/null
 
 echo "Release published: ${TAG} (asset: ${ASSET_NAME})"
-
