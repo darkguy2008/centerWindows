@@ -12,17 +12,20 @@ enum WindowCenteringError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .accessibilityPermissionMissing:
-            return "缺少辅助功能权限，请在“系统设置 -> 隐私与安全性 -> 辅助功能”中授权。"
+            return Preferences.L(
+                "缺少辅助功能权限，请在“系统设置 -> 隐私与安全性 -> 辅助功能”中授权。",
+                "Accessibility permission missing. Please grant access in System Settings > Privacy & Security > Accessibility."
+            )
         case .noFrontmostApplication:
-            return "未检测到前台应用。"
+            return Preferences.L("未检测到前台应用。", "No frontmost application detected.")
         case .noWindow:
-            return "前台应用没有可操作窗口。"
+            return Preferences.L("前台应用没有可操作窗口。", "The frontmost application has no operable window.")
         case .fullscreenWindow:
-            return "当前窗口处于全屏状态，已跳过居中。"
+            return Preferences.L("当前窗口处于全屏状态，已跳过居中。", "Window is fullscreen; centering skipped.")
         case .unableToReadWindowFrame:
-            return "无法读取窗口位置或尺寸。"
+            return Preferences.L("无法读取窗口位置或尺寸。", "Unable to read window position or size.")
         case .unableToWriteWindowPosition:
-            return "无法设置窗口位置（窗口可能不可移动）。"
+            return Preferences.L("无法设置窗口位置（窗口可能不可移动）。", "Unable to set window position (the window may not be movable).")
         }
     }
 }
