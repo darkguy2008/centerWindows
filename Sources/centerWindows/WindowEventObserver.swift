@@ -9,11 +9,6 @@ final class WindowEventObserver {
     private var centeredWindowKeys: [String] = []
     private var centeredWindowKeySet: Set<String> = []
     private var initialCenterTimer: DispatchSourceTimer?
-    /// Timestamp when we attached to the current app. AXWindowCreated events
-    /// within a short grace period are ignored — some apps (e.g. Chrome) fire
-    /// spurious window-created notifications on every activation.
-    private var attachTime: CFAbsoluteTime = 0
-    private let attachGracePeriod: CFAbsoluteTime = 5.0
 
     init(service: WindowCenteringService) {
         self.service = service
@@ -80,7 +75,6 @@ final class WindowEventObserver {
 
         observer = newObserver
         observedPID = pid
-        attachTime = CFAbsoluteTimeGetCurrent()
 
         CFRunLoopAddSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(newObserver), .defaultMode)
 
@@ -103,10 +97,11 @@ final class WindowEventObserver {
 
         let isNewWindow = notification == kAXWindowCreatedNotification as String
 
-        // Some apps (e.g. Chrome) fire spurious AXWindowCreated on every activation.
-        // Ignore window-created events shortly after attaching to avoid centering on switch.
-        if isNewWindow && (CFAbsoluteTimeGetCurrent() - attachTime) < attachGracePeriod {
-            NSLog("[cw] SKIPPED (grace period) notification=%@ app=%@", notification, appName)
+        // For AXWindowCreated, check the notification element itself. Some apps
+        // (e.g. Chrome) fire spurious AXWindowCreated for internal helper windows
+        // that are not standard windows. Filter them out at the source.
+        if isNewWindow && !isAutoCenterEligibleWindow(element) {
+            NSLog("[cw] SKIPPED (ineligible created element) app=%@", appName)
             return false
         }
 
@@ -131,19 +126,16 @@ final class WindowEventObserver {
             return false
         }
 
-        guard let wKey = key(pid: pid, window: windowElement) else {
-            NSLog("[cw] SKIPPED (no window number) app=%@", appName)
-            return false
-        }
-        if centeredWindowKeySet.contains(wKey) {
+        let wKey = key(pid: pid, window: windowElement)
+        if let wKey, centeredWindowKeySet.contains(wKey) {
             NSLog("[cw] SKIPPED (already centered) key=%@", wKey)
             return false
         }
 
         do {
             try service.centerWindowElement(windowElement, pid: pid, appElement: appElement)
-            recordCenteredKey(wKey)
-            NSLog("[cw] CENTERED key=%@ app=%@", wKey, appName)
+            if let wKey { recordCenteredKey(wKey) }
+            NSLog("[cw] CENTERED key=%@ app=%@", wKey ?? "?", appName)
             return true
         } catch {
             NSLog("[cw] FAILED: %@", error.localizedDescription)
