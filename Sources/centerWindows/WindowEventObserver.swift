@@ -9,6 +9,11 @@ final class WindowEventObserver {
     private var centeredWindowKeys: [String] = []
     private var centeredWindowKeySet: Set<String> = []
     private var initialCenterTimer: DispatchSourceTimer?
+    /// Timestamp when we attached to the current app. AXWindowCreated events
+    /// within a short grace period are ignored — some apps (e.g. Chrome) fire
+    /// spurious window-created notifications on every activation.
+    private var attachTime: CFAbsoluteTime = 0
+    private let attachGracePeriod: CFAbsoluteTime = 5.0
 
     init(service: WindowCenteringService) {
         self.service = service
@@ -75,6 +80,7 @@ final class WindowEventObserver {
 
         observer = newObserver
         observedPID = pid
+        attachTime = CFAbsoluteTimeGetCurrent()
 
         CFRunLoopAddSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(newObserver), .defaultMode)
 
@@ -93,8 +99,22 @@ final class WindowEventObserver {
 
     @discardableResult
     private func handle(notification: String, element: AXUIElement, forcedPID: pid_t? = nil) -> Bool {
-        // For focused-window-changed, element is usually the app; for window-created it can be the window.
-        // We always center the current focused window once per window.
+        let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
+
+        let isNewWindow = notification == kAXWindowCreatedNotification as String
+
+        // Some apps (e.g. Chrome) fire spurious AXWindowCreated on every activation.
+        // Ignore window-created events shortly after attaching to avoid centering on switch.
+        if isNewWindow && (CFAbsoluteTimeGetCurrent() - attachTime) < attachGracePeriod {
+            NSLog("[cw] SKIPPED (grace period) notification=%@ app=%@", notification, appName)
+            return false
+        }
+
+        let isEnabled = isNewWindow ? Preferences.centerNewWindows : Preferences.centerOnSwitch
+        NSLog("[cw] notification=%@ app=%@ isNewWindow=%d isEnabled=%d",
+              notification, appName, isNewWindow ? 1 : 0, isEnabled ? 1 : 0)
+        guard isEnabled else { return false }
+
         let pid: pid_t
         if let forcedPID {
             pid = forcedPID
@@ -103,22 +123,30 @@ final class WindowEventObserver {
             pid = app.processIdentifier
         }
 
-        // Only act on the frontmost app to avoid moving background windows.
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
 
         let appElement = AXUIElementCreateApplication(pid)
-        guard let windowElement = centerCandidateWindow(for: appElement) else { return false }
+        guard let windowElement = centerCandidateWindow(for: appElement) else {
+            NSLog("[cw] SKIPPED (no candidate window)")
+            return false
+        }
 
-        if hasCentered(windowElement: windowElement, pid: pid) {
+        guard let wKey = key(pid: pid, window: windowElement) else {
+            NSLog("[cw] SKIPPED (no window number) app=%@", appName)
+            return false
+        }
+        if centeredWindowKeySet.contains(wKey) {
+            NSLog("[cw] SKIPPED (already centered) key=%@", wKey)
             return false
         }
 
         do {
             try service.centerWindowElement(windowElement, pid: pid, appElement: appElement)
-            markCentered(windowElement: windowElement, pid: pid)
+            recordCenteredKey(wKey)
+            NSLog("[cw] CENTERED key=%@ app=%@", wKey, appName)
             return true
         } catch {
-            // Skip fullscreen or any other temporary failures silently.
+            NSLog("[cw] FAILED: %@", error.localizedDescription)
             return false
         }
     }
@@ -160,18 +188,9 @@ final class WindowEventObserver {
         }
 
         if let subrole = stringAttribute(kAXSubroleAttribute as CFString, on: window) {
-            if subrole == kAXStandardWindowSubrole as String {
-                return true
-            }
-            // Explicitly skip common "secondary" window types.
-            if subrole == kAXDialogSubrole as String ||
-                subrole == kAXSystemDialogSubrole as String ||
-                subrole == kAXFloatingWindowSubrole as String
-            {
-                return false
-            }
-            // For any other subrole, treat it as non-standard to avoid surprise movements.
-            return false
+            // Only standard windows are eligible; dialogs, floating panels, and
+            // any other subrole are skipped to avoid surprise movements.
+            return subrole == kAXStandardWindowSubrole as String
         }
 
         // No subrole exposed: treat as eligible (many apps omit it for normal windows).
@@ -287,17 +306,9 @@ final class WindowEventObserver {
         return "\(pid):\(num)"
     }
 
-    private func hasCentered(windowElement: AXUIElement, pid: pid_t) -> Bool {
-        guard let k = key(pid: pid, window: windowElement) else { return false }
-        return centeredWindowKeySet.contains(k)
-    }
-
-    private func markCentered(windowElement: AXUIElement, pid: pid_t) {
-        guard let k = key(pid: pid, window: windowElement) else { return }
-        if centeredWindowKeySet.contains(k) { return }
-
-        centeredWindowKeySet.insert(k)
-        centeredWindowKeys.append(k)
+    private func recordCenteredKey(_ key: String) {
+        guard centeredWindowKeySet.insert(key).inserted else { return }
+        centeredWindowKeys.append(key)
 
         // Prevent unbounded growth.
         if centeredWindowKeys.count > 200, let oldest = centeredWindowKeys.first {
