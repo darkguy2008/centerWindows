@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchCenterTimer: DispatchSourceTimer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Preferences.registerDefaults()
         setupStatusItem()
         _ = ScreenCapturePermission.ensureAuthorized(prompt: true)
         _ = AccessibilityPermission.ensureTrusted(prompt: true)
@@ -15,21 +16,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         centerOnceOnLaunch()
     }
 
+    // MARK: - Actions
+
     @objc private func centerNow() {
         centerNowInternal(showAlertOnFailure: true, selectionPolicy: .focusedOnly)
     }
 
-    private func centerNowInternal(showAlertOnFailure: Bool, selectionPolicy: WindowSelectionPolicy) {
-        do {
-            try centeringService.centerFrontmostWindow(selectionPolicy: selectionPolicy)
-        } catch {
-            if let centeringError = error as? WindowCenteringError, centeringError == .fullscreenWindow {
-                return
-            }
-            if showAlertOnFailure {
-                showAlert(title: "窗口居中失败", message: error.localizedDescription)
-            }
-        }
+    @objc private func toggleCenterNewWindows(_ sender: NSMenuItem) {
+        Preferences.centerNewWindows.toggle()
+        sender.state = Preferences.centerNewWindows ? .on : .off
+    }
+
+    @objc private func toggleCenterOnSwitch(_ sender: NSMenuItem) {
+        Preferences.centerOnSwitch.toggle()
+        sender.state = Preferences.centerOnSwitch ? .on : .off
+    }
+
+    @objc private func selectChinese() {
+        Preferences.language = "zh"
+        rebuildMenu()
+    }
+
+    @objc private func selectEnglish() {
+        Preferences.language = "en"
+        rebuildMenu()
     }
 
     @objc private func openAccessibilitySettings() {
@@ -43,6 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
     }
+
+    // MARK: - Menu
 
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -59,44 +71,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.button?.title = "centerWindows"
         }
 
+        statusItem = item
+        rebuildMenu()
+    }
+
+    private func rebuildMenu() {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        let centerItem = menu.addItem(
-            withTitle: "立即将前台窗口居中",
-            action: #selector(centerNow),
-            keyEquivalent: ""
-        )
-        centerItem.target = self
+        addMenuItem(to: menu, Preferences.L("立即将前台窗口居中", "Center frontmost window"), #selector(centerNow))
 
         menu.addItem(.separator())
-        let permissionItem = menu.addItem(
-            withTitle: "打开辅助功能权限设置",
-            action: #selector(openAccessibilitySettings),
-            keyEquivalent: ""
-        )
-        permissionItem.target = self
-        let screenPermissionItem = menu.addItem(
-            withTitle: "打开屏幕录制权限设置",
-            action: #selector(openScreenCaptureSettings),
-            keyEquivalent: ""
-        )
-        screenPermissionItem.target = self
-        menu.addItem(.separator())
-        let quitItem = menu.addItem(
-            withTitle: "退出",
-            action: #selector(quitApp),
-            keyEquivalent: ""
-        )
-        quitItem.target = self
 
-        item.menu = menu
-        statusItem = item
+        addMenuItem(to: menu, Preferences.L("新窗口自动居中", "Center new windows"),
+                    #selector(toggleCenterNewWindows(_:)), checked: Preferences.centerNewWindows)
+        addMenuItem(to: menu, Preferences.L("切换应用时自动居中", "Center on app switch"),
+                    #selector(toggleCenterOnSwitch(_:)), checked: Preferences.centerOnSwitch)
+
+        menu.addItem(.separator())
+
+        addMenuItem(to: menu, "中文", #selector(selectChinese), checked: Preferences.language == "zh")
+        addMenuItem(to: menu, "English", #selector(selectEnglish), checked: Preferences.language == "en")
+
+        menu.addItem(.separator())
+
+        addMenuItem(to: menu, Preferences.L("打开辅助功能权限设置", "Open Accessibility settings"),
+                    #selector(openAccessibilitySettings))
+        addMenuItem(to: menu, Preferences.L("打开屏幕录制权限设置", "Open Screen Recording settings"),
+                    #selector(openScreenCaptureSettings))
+
+        menu.addItem(.separator())
+
+        addMenuItem(to: menu, Preferences.L("退出", "Quit"), #selector(quitApp))
+
+        statusItem?.menu = menu
+    }
+
+    private func addMenuItem(to menu: NSMenu, _ title: String, _ action: Selector, checked: Bool? = nil) {
+        let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+        item.target = self
+        if let checked {
+            item.state = checked ? .on : .off
+        }
+    }
+
+    // MARK: - Centering helpers
+
+    private func centerNowInternal(showAlertOnFailure: Bool, selectionPolicy: WindowSelectionPolicy) {
+        do {
+            try centeringService.centerFrontmostWindow(selectionPolicy: selectionPolicy)
+        } catch {
+            if let centeringError = error as? WindowCenteringError, centeringError == .fullscreenWindow {
+                return
+            }
+            if showAlertOnFailure {
+                showAlert(
+                    title: Preferences.L("窗口居中失败", "Window centering failed"),
+                    message: error.localizedDescription
+                )
+            }
+        }
     }
 
     private func centerOnceOnLaunch() {
-        // On launch, focus/permission prompts can delay when the "real" frontmost window is stable.
-        // Retry for a short period without showing alerts.
+        guard Preferences.centerOnSwitch else { return }
         launchCenterTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: .main)
         var attempts = 0
@@ -106,7 +144,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             attempts += 1
             self.centerNowInternal(showAlertOnFailure: false, selectionPolicy: .focusedOrAnyNonFullscreen)
 
-            // Stop after a few seconds to avoid any "continuous" behavior.
             if attempts >= 10 {
                 self.launchCenterTimer?.cancel()
                 self.launchCenterTimer = nil
